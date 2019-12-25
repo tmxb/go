@@ -106,13 +106,16 @@ func numError(err error) error {
 }
 
 // -- bool Value
+// 这里用别名对bool进行扩展
 type boolValue bool
 
+// 转换成boolValue类型指针
 func newBoolValue(val bool, p *bool) *boolValue {
 	*p = val
 	return (*boolValue)(p)
 }
 
+// 实现value接口，将命令行接收到的输入值转换为boolValue指针并保存
 func (b *boolValue) Set(s string) error {
 	v, err := strconv.ParseBool(s)
 	if err != nil {
@@ -122,6 +125,7 @@ func (b *boolValue) Set(s string) error {
 	return err
 }
 
+// 返回当前boolValue
 func (b *boolValue) Get() interface{} { return bool(*b) }
 
 func (b *boolValue) String() string { return strconv.FormatBool(bool(*b)) }
@@ -317,6 +321,7 @@ const (
 //
 // Flag names must be unique within a FlagSet. An attempt to define a flag whose
 // name is already in use will cause a panic.
+// Flag集合
 type FlagSet struct {
 	// Usage is the function called when an error occurs while parsing flags.
 	// The field is a function (not a method) that may be changed to point to
@@ -325,16 +330,17 @@ type FlagSet struct {
 	// to ExitOnError, which exits the program after calling Usage.
 	Usage func()
 
-	name          string
-	parsed        bool
-	actual        map[string]*Flag
-	formal        map[string]*Flag
-	args          []string // arguments after flags
-	errorHandling ErrorHandling
-	output        io.Writer // nil means stderr; use out() accessor
+	name          string           // 命令名称
+	parsed        bool             // 传入的Flag是否已经被解析
+	actual        map[string]*Flag // 实际传入的 Flag组
+	formal        map[string]*Flag // 定义的Flag组
+	args          []string         // arguments after flags
+	errorHandling ErrorHandling    // 命令解析失败时默认的错误处理
+	output        io.Writer        // nil means stderr; use out() accessor
 }
 
 // A Flag represents the state of a flag.
+// 单个flag结构
 type Flag struct {
 	Name     string // name as it appears on command line
 	Usage    string // help message
@@ -343,6 +349,7 @@ type Flag struct {
 }
 
 // sortFlags returns the flags as a slice in lexicographical sorted order.
+// 返回按字典序列排序的flag集合
 func sortFlags(flags map[string]*Flag) []*Flag {
 	result := make([]*Flag, len(flags))
 	i := 0
@@ -383,6 +390,7 @@ func (f *FlagSet) SetOutput(output io.Writer) {
 
 // VisitAll visits the flags in lexicographical order, calling fn for each.
 // It visits all flags, even those not set.
+// 编译flag
 func (f *FlagSet) VisitAll(fn func(*Flag)) {
 	for _, flag := range sortFlags(f.formal) {
 		fn(flag)
@@ -840,6 +848,7 @@ func (f *FlagSet) Var(value Value, name string, usage string) {
 	// Remember the default value as a string; it won't change.
 	flag := &Flag{name, usage, value, value.String()}
 	_, alreadythere := f.formal[name]
+	// 去重检查
 	if alreadythere {
 		var msg string
 		if f.name == "" {
@@ -853,6 +862,7 @@ func (f *FlagSet) Var(value Value, name string, usage string) {
 	if f.formal == nil {
 		f.formal = make(map[string]*Flag)
 	}
+	//创建flag后加入格式化flag数组
 	f.formal[name] = flag
 }
 
@@ -964,6 +974,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 // include the command name. Must be called after all flags in the FlagSet
 // are defined and before flags are accessed by the program.
 // The return value will be ErrHelp if -help or -h were set but not defined.
+// 根据传入参数解析flag
 func (f *FlagSet) Parse(arguments []string) error {
 	f.parsed = true
 	f.args = arguments
