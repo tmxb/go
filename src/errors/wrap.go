@@ -11,6 +11,14 @@ import (
 // Unwrap returns the result of calling the Unwrap method on err, if err's
 // type contains an Unwrap method returning error.
 // Otherwise, Unwrap returns nil.
+//
+// Golang1.13新增了error嵌套(Wrapping Error),详见fmt.Errorf:
+//
+// e := errors.New("src err")
+// w := fmt.Errorf("Wrapped err %w", e)
+//
+// 可用Error的Unwrap方法解嵌套，这里只能返回最近一层的error，如果有多层嵌套，需要多次调用Unwrap
+//
 func Unwrap(err error) error {
 	u, ok := err.(interface {
 		Unwrap() error
@@ -36,22 +44,29 @@ func Unwrap(err error) error {
 //
 // then Is(MyError{}, os.ErrExist) returns true. See syscall.Errno.Is for
 // an example in the standard library.
+//
+// 检索整个error嵌套链，分别和target比较，相等则返回true
+//
 func Is(err, target error) bool {
 	if target == nil {
 		return err == target
 	}
 
+	// 检查target类型能不能做比较运算
 	isComparable := reflectlite.TypeOf(target).Comparable()
 	for {
+		// err相同，返回结果
 		if isComparable && err == target {
 			return true
 		}
+		// 调用当前err的Is方法判断，Is方法可以自己的自定义实现
 		if x, ok := err.(interface{ Is(error) bool }); ok && x.Is(target) {
 			return true
 		}
 		// TODO: consider supporting target.Is(err). This would allow
 		// user-definable predicates, but also may allow for coping with sloppy
 		// APIs, thereby making it easier to get away with them.
+		// 继续往下一层检查比较子err
 		if err = Unwrap(err); err == nil {
 			return false
 		}
@@ -74,20 +89,26 @@ func Is(err, target error) bool {
 //
 // As panics if target is not a non-nil pointer to either a type that implements
 // error, or to any interface type.
+//
+// 检索整个error嵌套链，找到类型符合的err赋予target
+//
 func As(err error, target interface{}) bool {
 	if target == nil {
 		panic("errors: target cannot be nil")
 	}
 	val := reflectlite.ValueOf(target)
 	typ := val.Type()
+	// 规避空指针
 	if typ.Kind() != reflectlite.Ptr || val.IsNil() {
 		panic("errors: target must be a non-nil pointer")
 	}
+	// 规避非error类型
 	if e := typ.Elem(); e.Kind() != reflectlite.Interface && !e.Implements(errorType) {
 		panic("errors: *target must be interface or implement error")
 	}
 	targetType := typ.Elem()
 	for err != nil {
+		// 判断err的类型是否可以转成target（类型断言的反射实现），如果可以把err赋值给target
 		if reflectlite.TypeOf(err).AssignableTo(targetType) {
 			val.Elem().Set(reflectlite.ValueOf(err))
 			return true
