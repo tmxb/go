@@ -5,6 +5,7 @@
 // Package bufio implements buffered I/O. It wraps an io.Reader or io.Writer
 // object, creating another object (Reader or Writer) that also implements
 // the interface but provides buffering and some help for textual I/O.
+// bufio 包实现了缓存I/O
 package bufio
 
 import (
@@ -43,6 +44,8 @@ const maxConsecutiveEmptyReads = 100
 // NewReaderSize returns a new Reader whose buffer has at least the specified
 // size. If the argument io.Reader is already a Reader with large enough
 // size, it returns the underlying Reader.
+// 返回一个带缓存的Reader对象. 如果Reader的缓存size已经足够（大于定义的size），则直接返回这个Reader
+// 最小缓存size为16
 func NewReaderSize(rd io.Reader, size int) *Reader {
 	// Is it already a Reader?
 	b, ok := rd.(*Reader)
@@ -58,15 +61,18 @@ func NewReaderSize(rd io.Reader, size int) *Reader {
 }
 
 // NewReader returns a new Reader whose buffer has the default size.
+// 返回一个带默认缓存长度(defaultBufSize)的Reader对象
 func NewReader(rd io.Reader) *Reader {
 	return NewReaderSize(rd, defaultBufSize)
 }
 
 // Size returns the size of the underlying buffer in bytes.
+// 返回缓存大小
 func (b *Reader) Size() int { return len(b.buf) }
 
 // Reset discards any buffered data, resets all state, and switches
 // the buffered reader to read from r.
+// 重置Reader,丢弃当前缓存数据
 func (b *Reader) Reset(r io.Reader) {
 	b.reset(b.buf, r)
 }
@@ -83,8 +89,10 @@ func (b *Reader) reset(buf []byte, r io.Reader) {
 var errNegativeRead = errors.New("bufio: reader returned negative count from Read")
 
 // fill reads a new chunk into the buffer.
+// 把新的数据块读到缓存
 func (b *Reader) fill() {
 	// Slide existing data to beginning.
+	// 将起点滑动到已读位置
 	if b.r > 0 {
 		copy(b.buf, b.buf[b.r:b.w])
 		b.w -= b.r
@@ -96,6 +104,7 @@ func (b *Reader) fill() {
 	}
 
 	// Read new data: try a limited number of times.
+	// 读新数据：maxConsecutiveEmptyReads(100)次
 	for i := maxConsecutiveEmptyReads; i > 0; i-- {
 		n, err := b.rd.Read(b.buf[b.w:])
 		if n < 0 {
@@ -126,6 +135,9 @@ func (b *Reader) readErr() error {
 //
 // Calling Peek prevents a UnreadByte or UnreadRune call from succeeding
 // until the next read operation.
+// Peek 返回缓存中n个字节的数据，但不会读出，引用的数据在下一次读取操作之前有效
+// 如果返回数据长度小于n，则报错并返回报错原因
+// 如果缓存长度小于n，则返回ErrBufferFull报错
 func (b *Reader) Peek(n int) ([]byte, error) {
 	if n < 0 {
 		return nil, ErrNegativeCount
@@ -134,10 +146,12 @@ func (b *Reader) Peek(n int) ([]byte, error) {
 	b.lastByte = -1
 	b.lastRuneSize = -1
 
+	// 如果当前缓存区数据长度不足n，且缓存区未满，尝试填充
 	for b.w-b.r < n && b.w-b.r < len(b.buf) && b.err == nil {
 		b.fill() // b.w-b.r < len(b.buf) => buffer is not full
 	}
 
+	// 缓存长度小于n 返回ErrBufferFull
 	if n > len(b.buf) {
 		return b.buf[b.r:b.w], ErrBufferFull
 	}
@@ -160,6 +174,9 @@ func (b *Reader) Peek(n int) ([]byte, error) {
 // If Discard skips fewer than n bytes, it also returns an error.
 // If 0 <= n <= b.Buffered(), Discard is guaranteed to succeed without
 // reading from the underlying io.Reader.
+// 跳过接下来的n个字节，返回丢弃的字节数
+// 如果跳过的字节数小于n，则返回报错
+// 如果n小于缓存中的数据长度，则不会从reader读数据
 func (b *Reader) Discard(n int) (discarded int, err error) {
 	if n < 0 {
 		return 0, ErrNegativeCount
@@ -169,7 +186,9 @@ func (b *Reader) Discard(n int) (discarded int, err error) {
 	}
 	remain := n
 	for {
+		//当前缓存中未读取的数据
 		skip := b.Buffered()
+		//缓存中未读为空，则先尝试填充下
 		if skip == 0 {
 			b.fill()
 			skip = b.Buffered()
@@ -179,9 +198,11 @@ func (b *Reader) Discard(n int) (discarded int, err error) {
 		}
 		b.r += skip
 		remain -= skip
+		//刚刚足够跳过
 		if remain == 0 {
 			return n, nil
 		}
+		//填充完后还有错误，直接返回
 		if b.err != nil {
 			return n - remain, b.readErr()
 		}
@@ -194,7 +215,10 @@ func (b *Reader) Discard(n int) (discarded int, err error) {
 // hence n may be less than len(p).
 // To read exactly len(p) bytes, use io.ReadFull(b, p).
 // At EOF, the count will be zero and err will be io.EOF.
+// 把数据读取到p中，返回读取到p的字节长度，读取的数据可能小于p的长度
+// 如果需要读取固定的长度，使用io.ReadFull
 func (b *Reader) Read(p []byte) (n int, err error) {
+	//p为空字节数组
 	n = len(p)
 	if n == 0 {
 		if b.Buffered() > 0 {
@@ -202,10 +226,12 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 		}
 		return 0, b.readErr()
 	}
+	//没有未读的缓存
 	if b.r == b.w {
 		if b.err != nil {
 			return 0, b.readErr()
 		}
+		//需要读取的长度大于缓存，则直接从reader读
 		if len(p) >= len(b.buf) {
 			// Large read, empty buffer.
 			// Read directly into p to avoid copy.
@@ -221,6 +247,7 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 		}
 		// One read.
 		// Do not use b.fill, which will loop.
+		// 读取一次到缓存区中
 		b.r = 0
 		b.w = 0
 		n, b.err = b.rd.Read(b.buf)
@@ -233,6 +260,7 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 		b.w += n
 	}
 
+	// 将目前缓存区的数据全部读出
 	// copy as much as we can
 	n = copy(p, b.buf[b.r:b.w])
 	b.r += n
@@ -243,6 +271,7 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 
 // ReadByte reads and returns a single byte.
 // If no byte is available, returns an error.
+// 读取返回单个字节
 func (b *Reader) ReadByte() (byte, error) {
 	b.lastRuneSize = -1
 	for b.r == b.w {
@@ -262,6 +291,7 @@ func (b *Reader) ReadByte() (byte, error) {
 // UnreadByte returns an error if the most recent method called on the
 // Reader was not a read operation. Notably, Peek is not considered a
 // read operation.
+// 将最后读取的一个字节设为未读
 func (b *Reader) UnreadByte() error {
 	if b.lastByte < 0 || b.r == 0 && b.w > 0 {
 		return ErrInvalidUnreadByte
